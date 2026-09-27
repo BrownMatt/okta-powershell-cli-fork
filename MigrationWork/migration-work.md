@@ -27,7 +27,7 @@ should see. Replace `yourcompany` with your org's name wherever it appears.
 | File | What it is | Do you run it? |
 |------|------------|----------------|
 | `Export-OktaWebApps.ps1` | Reads the web apps from an org and saves them to a file. **Read-only.** It never changes anything. | Yes (step 7.1) |
-| `Import-OktaWebApps.ps1` | Creates apps in another org from the saved file. | Yes (steps 7.3 and 7.4) |
+| `Import-OktaWebApps.ps1` | Creates the apps in another org from the saved file, or updates them if they already exist there. | Yes (steps 7.3 and 7.4) |
 | `OktaMigration.Common.ps1` | Helper code the two scripts share. | No, it loads automatically |
 | `url-map.sample.csv` | Example file for swapping production URLs for test URLs. | You copy and edit it (step 7.2) |
 | `migration-work.md` | This guide. | |
@@ -82,7 +82,7 @@ The script prints a web address. You open it, sign in to Okta as yourself (inclu
  yourcompany.okta.com                                      yourcompany.oktapreview.com
 
  ┌──────────────────┐  Export-OktaWebApps.ps1  ┌──────────────┐  Import-OktaWebApps.ps1  ┌──────────────┐
- │ OIDC web apps    │ ───── (read only) ─────> │ export .json │ ──── (creates apps) ───> │ new web apps │
+ │ OIDC web apps    │ ───── (read only) ─────> │ export .json │ ─ (creates or updates) > │ web apps     │
  └──────────────────┘                          │ summary .csv │                          └──────────────┘
                                                └──────────────┘
                                                       │
@@ -95,13 +95,50 @@ The script prints a web address. You open it, sign in to Okta as yourself (inclu
 2. **Review** the summary. Optionally create a **URL map** so that
    `https://payroll.yourcompany.com` becomes `https://payroll-test.yourcompany.com` in preview.
 3. **Dry run** the import against preview. It checks everything and shows what it would do, but
-   creates nothing.
-4. **Import** for real. Each app gets a new Client ID and client secret in preview.
+   creates and changes nothing.
+4. **Import** for real. New apps get a new Client ID and client secret in preview. Apps that are
+   already in preview are updated to match production.
 5. **Hand the new Client IDs and secrets** to the app owners, so their test environments can point
    at preview.
 
-You can run the import as many times as you like. Apps that already exist in preview (same label) are
-skipped, never overwritten or duplicated.
+### Running the import more than once
+
+You can run the import **as many times as you like**. For each app it checks whether an app with the
+**same label** already exists in preview:
+
+| In preview... | What the import does |
+|---------------|----------------------|
+| No app with that label | **Creates** the app. |
+| One app with that label, and its settings already match the export | **Nothing**. It reports `Unchanged`. |
+| One app with that label, with different settings | **Updates** the app so it matches the export, and lists exactly which settings changed. |
+| More than one app with that label | **Stops for that app** (`Failed`) and lists their IDs. It can't tell which one to update. |
+| An app with that label that isn't an OIDC app (e.g. a SAML app) | **Stops for that app** (`Failed`). It won't turn one kind of app into another. |
+
+So to bring preview up to date after production changes, just **export again and import again**.
+
+When an existing app is **updated**:
+- **Kept as they are:** its **label**, **Client ID** and **client secret**. The app keeps working
+  for anyone already using it in preview.
+- **Kept as they are:** its **active/inactive status** and its signing keys.
+- **Copied from the export:**
+  - sign-in and sign-out redirect URIs, grant types and response types
+  - client authentication, PKCE and consent settings
+  - issuer mode, initiate-login URI and the other URIs
+  - visibility, accessibility and notes
+
+  A redirect URI that was removed in production is removed in preview too.
+- **Authentication policy (Identity Engine):** changed only if the policy chosen for the app
+  ([section 5](#5-identity-engine-or-classic)) is different from the one it has now. If no policy is
+  chosen, the current one is kept.
+- **Groups (with `-AssignGroups`):** groups the app is missing are **added**. Groups are **never
+  removed**, so any extra groups you added by hand in preview stay.
+
+If you'd rather leave existing apps alone, add `-ExistingApps Skip`. Existing apps are then reported
+as `Skipped` and not touched.
+
+> **Matching is by label.** If you rename an app in production (or in preview), the import no longer
+> recognises it and creates a second app. To avoid this, give the two apps the same label again
+> before running the import.
 
 ---
 
@@ -363,14 +400,17 @@ also type the whole command on one line without the backticks.
 Read the output. For each app you see the redirect URIs it would get (after the URL map), the
 authentication policy, and any groups that don't exist in preview:
 ```
-DRY RUN: nothing will be created.
-==> Creating apps
-    [OK]   Payroll : would be created. Policy: Payroll MFA. Grant types: authorization_code, refresh_token
+DRY RUN: nothing will be created or changed.
+==> Creating and updating apps
+    [OK]   Payroll : would be CREATED. Policy: Payroll MFA. Grant types: authorization_code, refresh_token
            Sign-in redirect URIs : https://payroll-test.yourcompany.com/callback
            Sign-out redirect URIs: https://payroll-test.yourcompany.com/logout
     [WARN] Payroll : these groups do not exist in the target org: Payroll Admins
-    [WARN] HR Portal : already exists, skipped.
+    [OK]   HR Portal : would be UPDATED (0oa1ab2cd3EF). Changes: sign-in redirect URIs; notes
+    [OK]   Expenses : already up to date, nothing would change.
 ```
+**Read the "would be UPDATED" lines carefully.** They list exactly which settings of an existing
+preview app would be overwritten with the production values.
 A results file `exports/dryrun-results-....csv` is also written.
 
 ### 7.4 Run the import for real
@@ -390,23 +430,30 @@ Run the **same command without `-DryRun`**. To also save the new client secrets 
 
 At the end you get a count of each outcome:
 ```
-Created                12
-CreatedWithWarnings    2
-Skipped                3
+Created                  12
+CreatedWithWarnings      2
+Updated                  3
+Unchanged                5
 ```
 
 | Result | Meaning |
 |--------|---------|
 | `Created` | The app was created and everything was applied. |
 | `CreatedWithWarnings` | The app was created, but something extra didn't work, such as a group missing in preview or a policy that couldn't be assigned. The `Message` column says what. Fix that by hand in the Admin Console. |
-| `Skipped` | An app with the same label already exists in preview. Nothing was changed. |
-| `Failed` | Okta refused to create the app. The `Message` column has Okta's reason. See [Troubleshooting](#10-troubleshooting). |
-| `DryRun` | Dry run only; nothing was created. |
+| `Updated` | The app already existed in preview and was changed to match the export. The `Changes` column lists what changed. |
+| `UpdatedWithWarnings` | As `Updated`, but something extra didn't work (see the `Message` column). |
+| `Unchanged` | The app already existed in preview and already matched the export. Nothing was changed. |
+| `UnchangedWithWarnings` | As `Unchanged`, but there's something to look at, usually a group missing in preview (see the `Message` column). |
+| `Skipped` | The app exists in preview and you used `-ExistingApps Skip`. Nothing was changed. |
+| `Failed` | Okta refused to create or update the app, or the app couldn't be matched safely. The `Message` column says why. See [Troubleshooting](#10-troubleshooting). |
+| `WouldCreate`, `WouldUpdate`, `WouldNotChange` | Dry run only: what would happen. Nothing was changed. |
 
 ### 7.5 After the import
 
-1. Open `exports/import-results-....csv`. It lists each app's **new app ID** and **new Client ID**.
-2. If you used `-SaveClientSecrets`, `exports/client-secrets-....csv` holds the new secrets.
+1. Open `exports/import-results-....csv`. It lists each app's **app ID** and **Client ID** in
+   preview, and for updated apps, what changed.
+2. If you used `-SaveClientSecrets`, `exports/client-secrets-....csv` holds the secrets of the
+   **newly created** apps. Updated apps keep their existing secret.
    - Pass each secret to its app owner through a secure channel, such as your password manager.
      **Never** send them by email or chat.
    - Then **delete the file**.
@@ -444,16 +491,17 @@ Get-Help ./Import-OktaWebApps.ps1 -Detailed
 | `-OrgUrl` | **Yes** | The org to create apps in, e.g. `https://yourcompany.oktapreview.com`. |
 | `-ExportFile` | **Yes** | The `.json` file from the export. |
 | `-SignInFlow` | **Yes** | `IdentityEngine` or `Classic`. See [section 5](#5-identity-engine-or-classic). |
-| `-DryRun` | No | Check everything and show what would happen; create nothing. |
+| `-DryRun` | No | Check everything and show what would happen; create and change nothing. |
+| `-ExistingApps` | No | `Update` (default): update apps that already exist in preview. `Skip`: leave them alone. See [Running the import more than once](#running-the-import-more-than-once). |
 | `-AuthenticationPolicyName` | No | Identity Engine only: the policy to give every app, e.g. `"Any two factors"`. |
 | `-EnableInteractionCode` | No | Identity Engine only: add the Interaction Code grant type. |
 | `-UrlMapFile` | No | CSV with `Find,Replace` columns for swapping URLs ([7.2](#72-optional-create-a-url-map)). |
 | `-AssignGroups` | No | Assign the same groups as in production, matched by exact group name. |
 | `-Label` | No | Only import apps whose label matches, e.g. `-Label "Payroll*","HR*"`. |
-| `-KeepClientId` | No | Reuse the production Client ID instead of letting Okta generate a new one. |
+| `-KeepClientId` | No | When creating an app, reuse the production Client ID instead of letting Okta generate a new one. Existing apps always keep their Client ID. |
 | `-IssuerMode` | No | Force the issuer mode (`ORG_URL`, `CUSTOM_URL` or `DYNAMIC`) for all apps. See [Troubleshooting](#10-troubleshooting). |
-| `-CreateInactive` | No | Create apps deactivated, so you can activate them by hand later. |
-| `-SaveClientSecrets` | No | Save new Client IDs and secrets to a separate CSV. Handle it like a password. |
+| `-CreateInactive` | No | Create new apps deactivated, so you can activate them by hand later. The status of existing apps is never changed. |
+| `-SaveClientSecrets` | No | Save the Client IDs and secrets of newly created apps to a separate CSV. Handle it like a password. |
 | `-AuthMethod`, `-ClientId` | No | As for the export. |
 | `-ApiTokenEnvVar` | No | Default `OKTA_TARGET_API_TOKEN`. |
 | `-AllowSameOrg` | No | Safety override: allow importing into the same org the export came from. |
@@ -505,12 +553,16 @@ These things are **not** created in preview. Set them up by hand if you need the
 | `Failed` with a message about **redirect_uris** | A redirect URI isn't allowed, e.g. `http://` for a non-localhost address. Fix it in the URL map, or in the export `.json` under `definition`. |
 | `Failed` with a message about **interaction_code** | Interaction Code isn't enabled in the preview org. Leave out `-EnableInteractionCode`, or use `-SignInFlow Classic`. |
 | `Failed` with a message about **client_id** | You used `-KeepClientId` and that Client ID already exists in preview. Leave the option out. |
+| `Failed`: *2 apps labelled '...' exist in the target org* | Preview has duplicate apps with that label. Rename or delete the extra ones in the preview Admin Console, then run again. |
+| `Failed`: *exists but it is not an OpenID Connect app* | A non-OIDC app in preview (e.g. SAML) has the same label. Rename one of them, then run again. |
+| An app was created twice after being renamed | Apps are matched by label. Delete the duplicate, make the labels the same again, and re-run. |
 | `Groups not found in target org` | That group doesn't exist in preview. Create it, then assign it to the app in the Admin Console. |
 | `Hit Rate limit: Retrying request` (with `-Verbose`) | Okta is asking the script to slow down. It waits and retries automatically. |
 
 **Changing an app before import:** the export `.json` is a plain text file. Under each app,
 `definition` is exactly what gets sent to Okta, and you can edit it in a text editor. For example, you
-can change a `label` so the app gets a different name in preview. Keep a backup copy first.
+can change a `label` so the app gets a different name in preview. Keep a backup copy first. The
+label is also how the app is matched on the next run, so use the same edited file every time.
 
 **More detail:** add `-Verbose` to any command to see each request the scripts make.
 
