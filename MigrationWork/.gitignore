@@ -1,0 +1,5 @@
+# Export files and results contain org configuration, and client-secrets files contain secrets.
+# Never commit them.
+exports/
+client-secrets-*.csv
+url-map.csv
