@@ -1,0 +1,70 @@
+{
+    "packageName" : "Okta.PowerShell",
+    "isApiKey" : false,
+    "isBasicBearer" : true,
+    "isBasicBasic": false,
+    "apiNamePrefix": "Okta",
+    "companyName": "Okta",
+    "author": "Okta, Inc.",
+    "tags": "Okta,api,authentication,identity,management,PSEdition_Core",
+    "projectUri": "https://github.com/okta/okta-powershell-cli",
+    "licenseUri": "https://github.com/okta/okta-powershell-cli/blob/main/LICENSE.md",
+    "iconUri": "https://cdn.brandfolder.io/R30ALRIS/at/mtg52xxxcr939z2ns8jrg3mz/Okta_Aura_CMYK_Black.png",
+    "releaseNotes": "https://github.com/okta/okta-powershell-cli/releases",
+    "templateDir": "./codegen-templates",
+    "outputDir" : "../",
+    "inputSpec" : "./management.yaml", 
+    "packageVersion" : "2.0.2",
+    "packageGuid" : "E2BB23D9-1EB2-4082-B5E3-198D6F3FE65E",
+    "packageDescription" : "Official PowerShell CLI for the Okta API",
+    "packageTitle" : "Official PowerShell for the Okta API",
+    "packageCompany" : "Okta, Inc.",
+    "packageAuthors" : "Okta, Inc.",
+    "packageTags" : "okta api authentication identity management",
+    "packageCopyright" : "Okta, Inc.",
+    "gitHost": "github.com",
+    "gitUserId" : "okta",
+    "gitRepoId" : "okta-powershell-cli", 
+    "powershellVersion" : "7.0",
+    "globalProperties": {
+        "apiTests": false,
+        "modelTests": false
+    },
+    "authMethods": [{
+        "isApiKey" : false,
+        "isBasicBearer" : true,
+        "isBasicBasic": false
+    }],
+    "files": {
+        "okta_authenticationApi.mustache":{
+            "destinationFilename": "OktaAuthenticationApi.ps1",
+            "templateType": "SupportingFiles",
+            "folder": "/src/Okta.PowerShell/Api"
+        },
+        "url_helper.mustache":{
+            "destinationFilename": "UrlHelper.ps1",
+            "templateType": "SupportingFiles",
+            "folder": "/src/Okta.PowerShell/Client"
+        },
+        "okta_retryApi.mustache":{
+            "destinationFilename": "OktaRetryApi.ps1",
+            "templateType": "SupportingFiles",
+            "folder": "/src/Okta.PowerShell/Client"
+        },
+        "okta_apiException.mustache":{
+            "destinationFilename": "OktaApiException.ps1",
+            "templateType": "SupportingFiles",
+            "folder": "/src/Okta.PowerShell/Client"
+        },
+        "api_README.mustache":{
+            "destinationFilename":"API_README.md",
+            "templateType": "SupportingFiles",
+            "folder": "/"
+        },
+        "json_helper.mustache":{
+            "destinationFilename":"JsonHelper.ps1",
+            "templateType": "SupportingFiles",
+            "folder":  "/src/Okta.PowerShell/Client"
+        }
+    }
+}
