@@ -545,6 +545,7 @@ These things are **not** created in preview. Set them up by hand if you need the
 | `The Okta.PowerShell module was not found` | The `MigrationWork` folder was copied out of the repository. Keep it inside the full repository. |
 | `HTTP 401 ... The API token or sign-in is not valid for this org` | Wrong token, or a token from the other org. Production tokens only work in production, and preview tokens only in preview. |
 | `HTTP 403 ... does not have permission` | The admin who created the token lacks rights. Use a Super Administrator token for the import. |
+| `HTTP 400 - Invalid search criteria` while *Reading OpenID Connect apps* | Your org doesn't accept the filter used to list only OIDC apps. The current version of the export handles this: it prints a `[WARN]` line and reads all apps instead. If you still see this as a `[FAIL]`, get the latest version of this folder (see [6.2](#62-get-this-folder-onto-your-computer)). |
 | `The org URL must start with https://` | Include `https://`, e.g. `https://yourcompany.okta.com`. |
 | `The target org ... is the same org the export came from` | You pointed the import at production. Check `-OrgUrl`. |
 | `You chose -SignInFlow IdentityEngine, but ... is a Classic Engine org` | The preview org is Classic. Use `-SignInFlow Classic`. |
