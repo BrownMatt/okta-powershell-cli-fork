@@ -28,7 +28,8 @@ should see. Replace `yourcompany` with your org's name wherever it appears.
 |------|------------|----------------|
 | `Export-OktaWebApps.ps1` | Reads the web apps from an org and saves them to a file. **Read-only.** It never changes anything. | Yes (step 7.1) |
 | `Import-OktaWebApps.ps1` | Creates the apps in another org from the saved file, or updates them if they already exist there. | Yes (steps 7.3 and 7.4) |
-| `OktaMigration.Common.ps1` | Helper code the two scripts share. | No, it loads automatically |
+| `Export-OktaWebConfig.ps1` | Reads apps from an org and writes a `web.<app label>.config` file with each app's Okta settings, for developers. **Read-only.** | Optional (step 7.6) |
+| `OktaMigration.Common.ps1` | Helper code the scripts share. | No, it loads automatically |
 | `url-map.sample.csv` | Example file for swapping production URLs for test URLs. | You copy and edit it (step 7.2) |
 | `migration-work.md` | This guide. | |
 | `exports/` | Created automatically. Holds the export files and results. It is excluded from git. | |
@@ -101,10 +102,23 @@ The script prints a web address. You open it, sign in to Okta as yourself (inclu
 5. **Hand the new Client IDs and secrets** to the app owners, so their test environments can point
    at preview.
 
+### App names in preview
+
+The import adds the sign-in flow ([section 5](#5-identity-engine-or-classic)) to the end of each
+app's label:
+
+| Label in production | `-SignInFlow IdentityEngine` | `-SignInFlow Classic` |
+|---------------------|------------------------------|-----------------------|
+| `LHA_Dev` | `LHA_Dev OIE` | `LHA_Dev Classic` |
+
+So you can import the same app once with each flow, and preview then has both apps side by side.
+If a production label already ends with the same word (e.g. `LHA_Dev OIE` imported with
+`IdentityEngine`), nothing is added.
+
 ### Running the import more than once
 
 You can run the import **as many times as you like**. For each app it checks whether an app with the
-**same label** already exists in preview:
+**same label** (including the ` OIE` or ` Classic` ending) already exists in preview:
 
 | In preview... | What the import does |
 |---------------|----------------------|
@@ -117,7 +131,7 @@ You can run the import **as many times as you like**. For each app it checks whe
 So to bring preview up to date after production changes, just **export again and import again**.
 
 When an existing app is **updated**:
-- **Kept as they are:** its **label**, **Client ID** and **client secret**. The app keeps working
+- **Kept as they are:** its **Client ID** and **client secret**. The app keeps working
   for anyone already using it in preview.
 - **Kept as they are:** its **active/inactive status** and its signing keys.
 - **Copied from the export:**
@@ -138,7 +152,9 @@ as `Skipped` and not touched.
 
 > **Matching is by label.** If you rename an app in production (or in preview), the import no longer
 > recognises it and creates a second app. To avoid this, give the two apps the same label again
-> before running the import.
+> before running the import. Apps imported before the ` OIE`/` Classic` ending was added have no
+> ending, so the next import creates new apps next to them. Either rename the old ones in preview
+> (e.g. `LHA_Dev` to `LHA_Dev OIE`) before importing, or delete them afterwards.
 
 ---
 
@@ -190,7 +206,9 @@ Okta has two generations of its sign-in engine:
 If the page shows `"pipeline":"idx"`, the org uses **Identity Engine**. If it shows `"pipeline":"v1"`,
 it uses **Classic**. The scripts also check this and print it as "Org engine".
 
-When you import, you **must** choose one of the two with `-SignInFlow`:
+When you import, you **must** choose one of the two with `-SignInFlow`. The choice is also added to
+the end of each app's name in preview, as ` OIE` or ` Classic`
+([App names in preview](#app-names-in-preview)).
 
 ### `-SignInFlow IdentityEngine`
 
@@ -402,12 +420,12 @@ authentication policy, and any groups that don't exist in preview:
 ```
 DRY RUN: nothing will be created or changed.
 ==> Creating and updating apps
-    [OK]   Payroll : would be CREATED. Policy: Payroll MFA. Grant types: authorization_code, refresh_token
+    [OK]   Payroll OIE : would be CREATED. Policy: Payroll MFA. Grant types: authorization_code, refresh_token
            Sign-in redirect URIs : https://payroll-test.yourcompany.com/callback
            Sign-out redirect URIs: https://payroll-test.yourcompany.com/logout
-    [WARN] Payroll : these groups do not exist in the target org: Payroll Admins
-    [OK]   HR Portal : would be UPDATED (0oa1ab2cd3EF). Changes: sign-in redirect URIs; notes
-    [OK]   Expenses : already up to date, nothing would change.
+    [WARN] Payroll OIE : these groups do not exist in the target org: Payroll Admins
+    [OK]   HR Portal OIE : would be UPDATED (0oa1ab2cd3EF). Changes: sign-in redirect URIs; notes
+    [OK]   Expenses OIE : already up to date, nothing would change.
 ```
 **Read the "would be UPDATED" lines carefully.** They list exactly which settings of an existing
 preview app would be overwritten with the production values.
@@ -460,7 +478,62 @@ Unchanged                5
    - If you didn't save them, secrets can be copied from each app's **General** tab in the Admin Console.
 3. Sign in to the preview Admin Console, open a couple of the new apps, and compare them with production.
 4. Ask the app owners to point their test environment at the preview org and test sign-in.
-5. **Revoke the API tokens** ([6.5](#65-create-the-api-tokens-option-a)).
+5. If developers need `web.config` settings for the apps, do [7.6](#76-optional-write-webconfig-files-for-developers) now.
+6. **Revoke the API tokens** ([6.5](#65-create-the-api-tokens-option-a)).
+
+### 7.6 (optional) Write web.config files for developers
+
+`Export-OktaWebConfig.ps1` reads apps from an org and writes one file per app with the settings an
+ASP.NET app needs to sign in with Okta. Like the export, it only reads from Okta.
+
+```powershell
+./Export-OktaWebConfig.ps1 -OrgUrl https://yourcompany.oktapreview.com -Label "LHA_DQMP LocalHost"
+```
+
+This writes `exports/web.LHA_DQMP_LocalHost.config`. Use the label as it is in the org you read
+from: apps the import created in preview end in ` OIE` or ` Classic`, so there it's e.g.
+`-Label "LHA_DQMP LocalHost OIE"` (file `web.LHA_DQMP_LocalHost_OIE.config`) or `-Label "LHA_DQMP LocalHost*"` for both. Spaces and characters that aren't allowed in a
+file name become `_`. `-Label` accepts wildcards and lists, e.g. `-Label "LHA_*"` writes a file for
+every Web app whose label starts with `LHA_`. It signs in the same way as the import, and by
+default uses the preview token in `$env:OKTA_TARGET_API_TOKEN`.
+
+The file looks like this:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <appSettings>
+    <add key="okta:ClientId" value="0oa1abc..." />
+    <add key="okta:ClientSecret" value="..." />
+    <add key="okta:OrgUri" value="https://yourcompany.oktapreview.com" />
+    <add key="okta:RedirectUri" value="https://localhost:44300/authorization-code/callback" />
+    <!-- Other sign-in redirect URIs for this app: -->
+    <!-- <add key="okta:RedirectUri" value="https://dqmp.yourcompany.com/authorization-code/callback" /> -->
+    <add key="okta:PostLogoutRedirectUri" value="https://localhost:44300/" />
+    <!-- api key is same API key powershell script uses -->
+    <add key="okta:APIkey" value="..." />
+    <add key="oktaAPIuri" value="https://yourcompany.oktapreview.com" />
+  </appSettings>
+</configuration>
+```
+
+| Setting | Where the value comes from |
+|---------|----------------------------|
+| `okta:ClientId` | The app's Client ID. |
+| `okta:ClientSecret` | The app's newest **active** client secret. Empty, with a warning, if the app has none (for example it uses public/private keys). |
+| `okta:OrgUri`, `oktaAPIuri` | The org URL you passed to `-OrgUrl`, without `-admin`. |
+| `okta:RedirectUri` | The app's first sign-in redirect URI. Any others are listed as comments underneath; to use one, swap it with the active line. |
+| `okta:PostLogoutRedirectUri` | The app's first sign-out redirect URI, with the others as comments, in the same way. |
+| `okta:APIkey` | The API token the script signed in with. If you signed in with `-AuthMethod Browser` there is no token, so it's `REPLACE_WITH_OKTA_API_TOKEN`. |
+
+Running the script again overwrites the files with fresh values, for example after a secret is rotated.
+
+> **Warning:** each file holds a client secret and your **API token** in plain text. The token
+> carries all of your admin rights, so anyone who can read the file can change the org.
+> - Hand files over through a secure channel, such as your password manager. Never by email or chat.
+> - Don't commit them. `exports/` is excluded from git; if you use `-OutputFolder`, keep it outside the repository.
+> - If you revoke the token (step 7.5), the `okta:APIkey` in these files stops working too.
+>   For an app that keeps calling the Okta API, create a separate token for it and replace the value.
 
 ---
 
@@ -490,14 +563,14 @@ Get-Help ./Import-OktaWebApps.ps1 -Detailed
 |--------|-----------|--------------|
 | `-OrgUrl` | **Yes** | The org to create apps in, e.g. `https://yourcompany.oktapreview.com`. |
 | `-ExportFile` | **Yes** | The `.json` file from the export. |
-| `-SignInFlow` | **Yes** | `IdentityEngine` or `Classic`. See [section 5](#5-identity-engine-or-classic). |
+| `-SignInFlow` | **Yes** | `IdentityEngine` or `Classic`. See [section 5](#5-identity-engine-or-classic). Also adds ` OIE` or ` Classic` to the end of each app's label. |
 | `-DryRun` | No | Check everything and show what would happen; create and change nothing. |
 | `-ExistingApps` | No | `Update` (default): update apps that already exist in preview. `Skip`: leave them alone. See [Running the import more than once](#running-the-import-more-than-once). |
 | `-AuthenticationPolicyName` | No | Identity Engine only: the policy to give every app, e.g. `"Any two factors"`. |
 | `-EnableInteractionCode` | No | Identity Engine only: add the Interaction Code grant type. |
 | `-UrlMapFile` | No | CSV with `Find,Replace` columns for swapping URLs ([7.2](#72-optional-create-a-url-map)). |
 | `-AssignGroups` | No | Assign the same groups as in production, matched by exact group name. |
-| `-Label` | No | Only import apps whose label matches, e.g. `-Label "Payroll*","HR*"`. |
+| `-Label` | No | Only import apps whose label matches, e.g. `-Label "Payroll*","HR*"`. Use the production label, without ` OIE`/` Classic`. |
 | `-KeepClientId` | No | When creating an app, reuse the production Client ID instead of letting Okta generate a new one. Existing apps always keep their Client ID. |
 | `-IssuerMode` | No | Force the issuer mode (`ORG_URL`, `CUSTOM_URL` or `DYNAMIC`) for all apps. See [Troubleshooting](#10-troubleshooting). |
 | `-CreateInactive` | No | Create new apps deactivated, so you can activate them by hand later. The status of existing apps is never changed. |
@@ -505,6 +578,17 @@ Get-Help ./Import-OktaWebApps.ps1 -Detailed
 | `-AuthMethod`, `-ClientId` | No | As for the export. |
 | `-ApiTokenEnvVar` | No | Default `OKTA_TARGET_API_TOKEN`. |
 | `-AllowSameOrg` | No | Safety override: allow importing into the same org the export came from. |
+
+### Export-OktaWebConfig.ps1
+
+| Option | Required? | What it does |
+|--------|-----------|--------------|
+| `-OrgUrl` | **Yes** | The org to read from, e.g. `https://yourcompany.oktapreview.com`. |
+| `-Label` | **Yes** | Which apps, e.g. `"LHA_DQMP LocalHost"`, `"LHA_*"` or `"Payroll","HR Portal"`. |
+| `-AuthMethod`, `-ClientId` | No | As for the export. With `Browser`, `okta:APIkey` gets a placeholder. |
+| `-ApiTokenEnvVar` | No | Default `OKTA_TARGET_API_TOKEN`. Use `OKTA_SOURCE_API_TOKEN` to read from production. |
+| `-OutputFolder` | No | Where to write the files. Default: the `exports` folder here. |
+| `-IncludeInactive` | No | Also write files for deactivated apps. |
 
 #### Using an environment variable instead of pasting the token
 
@@ -557,13 +641,18 @@ These things are **not** created in preview. Set them up by hand if you need the
 | `Failed`: *2 apps labelled '...' exist in the target org* | Preview has duplicate apps with that label. Rename or delete the extra ones in the preview Admin Console, then run again. |
 | `Failed`: *exists but it is not an OpenID Connect app* | A non-OIDC app in preview (e.g. SAML) has the same label. Rename one of them, then run again. |
 | An app was created twice after being renamed | Apps are matched by label. Delete the duplicate, make the labels the same again, and re-run. |
+| Preview has both `LHA_Dev` and `LHA_Dev OIE` | `LHA_Dev` was imported before the ` OIE`/` Classic` ending was added. Delete it, or rename it before the next import ([Running the import more than once](#running-the-import-more-than-once)). |
 | `Groups not found in target org` | That group doesn't exist in preview. Create it, then assign it to the app in the Admin Console. |
+| `No active OpenID Connect Web app ... has a label matching ...` (web.config script) | Check the label's spelling in the Admin Console; capitals don't matter. Only OIDC **Web** apps are used. Add `-IncludeInactive` for a deactivated app. |
+| `has no client secret` (web.config script) | The app signs in with public/private keys or has no secret. `okta:ClientSecret` is left empty. |
+| `Another app gets the same file name` (web.config script) | Two labels differ only in characters that become `_`. The second file name ends with the app ID. |
 | `Hit Rate limit: Retrying request` (with `-Verbose`) | Okta is asking the script to slow down. It waits and retries automatically. |
 
 **Changing an app before import:** the export `.json` is a plain text file. Under each app,
 `definition` is exactly what gets sent to Okta, and you can edit it in a text editor. For example, you
-can change a `label` so the app gets a different name in preview. Keep a backup copy first. The
-label is also how the app is matched on the next run, so use the same edited file every time.
+can change a `label` so the app gets a different name in preview (` OIE` or ` Classic` is still
+added). Keep a backup copy first. The label is also how the app is matched on the next run, so use
+the same edited file every time.
 
 **More detail:** add `-Verbose` to any command to see each request the scripts make.
 

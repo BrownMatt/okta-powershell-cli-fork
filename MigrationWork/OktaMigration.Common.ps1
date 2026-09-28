@@ -184,6 +184,29 @@ function Get-OktaAllPages {
     return , $all.ToArray()
 }
 
+# Reads the org's apps, asking Okta for OpenID Connect apps only. Some orgs reject that filter
+# with "HTTP 400 - Invalid search criteria"; then every app is read instead. Callers must still
+# check each app's name and status, because the result can include non-OIDC apps.
+function Get-OktaOidcAppList {
+    foreach ($filter in @('name eq "oidc_client"', $null)) {
+        try {
+            if ($filter) { Write-Verbose "Listing apps with filter: $filter" } else { Write-Verbose "Listing all apps (no filter)" }
+            $apps = Get-OktaAllPages {
+                param($next)
+                if ($next) { Invoke-OktaListApplications -Uri $next -WithHttpInfo }
+                elseif ($filter) { Invoke-OktaListApplications -Filter $filter -Limit 200 -WithHttpInfo }
+                else { Invoke-OktaListApplications -Limit 200 -WithHttpInfo }
+            }
+            return , $apps
+        }
+        catch {
+            $isBadFilter = $_.Exception.GetType().Name -eq 'OktaApiException' -and [int]$_.Exception.StatusCode -eq 400
+            if (-not ($filter -and $isBadFilter)) { throw }
+            Write-Warn "Okta did not accept the filter '$filter' ($(Get-OktaErrorText $_)). Reading all apps instead; this is slower but gives the same result."
+        }
+    }
+}
+
 # Returns a property value, or $null when the property does not exist.
 function Get-Prop {
     param($Object, [string]$Name)

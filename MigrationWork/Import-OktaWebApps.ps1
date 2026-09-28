@@ -6,7 +6,9 @@
 .DESCRIPTION
     You can run this script as many times as you like. For every app in the export file it:
       1. Replaces production URLs with test URLs, if you give it a URL map file (optional).
-      2. Looks for an app with the same label in the target org.
+      2. Adds the sign-in flow to the end of the label: "LHA_Dev" becomes "LHA_Dev OIE" with
+         -SignInFlow IdentityEngine, or "LHA_Dev Classic" with -SignInFlow Classic.
+         Then it looks for an app with that label in the target org.
            - Not found: CREATES the app (Okta generates a new Client ID and client secret).
            - Found:     UPDATES the existing app so its settings match the export. The app keeps its
                         Client ID and client secret. If nothing is different, nothing is changed.
@@ -30,6 +32,7 @@
     Classic        - Set the apps up the Classic way: no authentication policy is assigned, and the
                      Identity-Engine-only "interaction_code" grant type is removed. On an Identity Engine
                      org, Okta then applies its default authentication policy to the app.
+    The flow is also added to the end of each app's label in the target org: " OIE" or " Classic".
 
 .PARAMETER ExistingApps
     What to do when an app with the same label already exists in the target org.
@@ -69,6 +72,7 @@
 
 .PARAMETER Label
     Only import apps whose label matches one of these patterns. * is a wildcard.
+    Use the label as it is in the export, without " OIE" or " Classic".
 
 .PARAMETER DryRun
     Show what would happen without creating or changing anything.
@@ -438,11 +442,17 @@ try {
         Write-Host "DRY RUN: nothing will be created or changed." -ForegroundColor Magenta
     }
 
+    $labelSuffix = if ($SignInFlow -eq 'Classic') { 'Classic' } else { 'OIE' }
+
     Write-Step "Creating and updating apps"
     foreach ($entry in $apps) {
         $def = Copy-DeepObject $entry.definition
         $source = $entry.source
-        $appLabel = $def.label
+        # The sign-in flow goes at the end of the label: "LHA_Dev" becomes "LHA_Dev Classic" or "LHA_Dev OIE".
+        # Apps are matched on this label, so each flow gets its own app in the target org.
+        $appLabel = $def.label.Trim()
+        if (-not $appLabel.EndsWith(" $labelSuffix", [StringComparison]::OrdinalIgnoreCase)) { $appLabel = "$appLabel $labelSuffix" }
+        $def.label = $appLabel
         $row = [ordered]@{
             Label = $appLabel; Result = ''; AppId = ''; ClientId = ''; Changes = ''
             AuthenticationPolicy = ''; GroupsAdded = ''; GroupsMissing = ''

@@ -3,3 +3,6 @@
 exports/
 client-secrets-*.csv
 url-map.csv
+
+# web.config files written by Export-OktaWebConfig.ps1 contain secrets.
+web.*.config
