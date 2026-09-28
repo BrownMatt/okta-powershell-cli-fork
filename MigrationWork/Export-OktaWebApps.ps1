@@ -126,26 +126,7 @@ try {
         -Scopes @('okta.apps.read', 'okta.groups.read', 'okta.policies.read')
 
     Write-Step "Reading OpenID Connect apps"
-    # Ask Okta for OIDC apps only. Some orgs reject this filter with "HTTP 400 - Invalid search
-    # criteria"; in that case read every app instead. The type and status are always checked here.
-    $allApps = $null
-    foreach ($filter in @('name eq "oidc_client"', $null)) {
-        try {
-            if ($filter) { Write-Verbose "Listing apps with filter: $filter" } else { Write-Verbose "Listing all apps (no filter)" }
-            $allApps = Get-OktaAllPages {
-                param($next)
-                if ($next) { Invoke-OktaListApplications -Uri $next -WithHttpInfo }
-                elseif ($filter) { Invoke-OktaListApplications -Filter $filter -Limit 200 -WithHttpInfo }
-                else { Invoke-OktaListApplications -Limit 200 -WithHttpInfo }
-            }
-            break
-        }
-        catch {
-            $isBadFilter = $_.Exception.GetType().Name -eq 'OktaApiException' -and [int]$_.Exception.StatusCode -eq 400
-            if (-not ($filter -and $isBadFilter)) { throw }
-            Write-Warn "Okta did not accept the filter '$filter' ($(Get-OktaErrorText $_)). Reading all apps instead; this is slower but gives the same result."
-        }
-    }
+    $allApps = Get-OktaOidcAppList
     $oidcApps = @($allApps | Where-Object {
         $_.name -eq 'oidc_client' -and ($IncludeInactive -or $_.status -eq 'ACTIVE')
     })
